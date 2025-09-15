@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="th" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Librarian V5.1 - ไลท์</title>
+    
+    <!-- Google Fonts: Sarabun -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <!-- highlight.js for code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    
+    <!-- Our Custom Stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Container หลักของแอปพลิเคชัน -->
+    <div id="app-container">
+        
+        <!-- ส่วนหัวของแอป -->
+        <header class="app-header">
+            <h1>AI Librarian <span>V5.1</span></h1>
+            <!-- ### <<< CHANGE START >>> ### -->
+            <!-- เพิ่ม data-lang-key สำหรับการเปลี่ยนภาษา -->
+            <p data-lang-key="greeting">สวัสดีค่ะ, ไลท์พร้อมให้คำแนะนำแล้ว</p>
+            <!-- ### <<< CHANGE END >>> ### -->
+        </header>
+        
+        <!-- หน้าต่างแสดงผลการแชท -->
+        <div id="chat-window">
+            <!-- ข้อความจะถูกเพิ่มที่นี่โดย JavaScript -->
+        </div>
+
+        <!-- UI พิเศษสำหรับโหมดเสียง (ซ่อนไว้ตอนแรก) -->
+        <div id="voice-mode-ui" class="hidden">
+            <div class="voice-status-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </div>
+            <!-- ### <<< CHANGE START >>> ### -->
+            <p id="voice-status-text" data-lang-key="voice_listening">กำลังรอรับคำสั่งเสียง...</p>
+            <button id="exit-voice-mode-btn" class="control-btn" data-lang-key="exit_voice_mode">
+                ออกจากโหมดเสียง
+            </button>
+            <!-- ### <<< CHANGE END >>> ### -->
+        </div>
+        
+        <!-- พื้นที่สำหรับพิมพ์ข้อความและปุ่มควบคุม -->
+        <div id="input-area">
+            <!-- ### <<< CHANGE START >>> ### -->
+            <textarea id="message-input" placeholder="พิมพ์คำถามของคุณที่นี่..." rows="1" data-lang-key="placeholder"></textarea>
+            <!-- ### <<< CHANGE END >>> ### -->
+            <button id="send-btn" class="control-btn icon-btn">
+                <!-- Send Icon -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            </button>
+            <button id="mic-btn" class="control-btn icon-btn">
+                <!-- Mic Icon -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>
+            </button>
+        </div>
+        
+        <!-- ### <<< CHANGE START >>> ### -->
+        <!-- แถบเครื่องมือเวอร์ชันอัปเกรด -->
+        <div id="toolbar">
+            <!-- กลุ่มปุ่มด้านซ้าย: ตัวเลือกโหมด -->
+            <div class="toolbar-group">
+                <button id="mode-toggle-btn" class="control-btn" title="สลับโหมด">
+                    <!-- ไอคอนหนังสือ (โหมด RAG) -->
+                    <span id="mode-icon-rag">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                    </span>
+                    <!-- ไอคอนแชท (โหมด General) - ซ่อนไว้ตอนแรก -->
+                    <span id="mode-icon-general" class="hidden">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                    </span>
+                    <span id="mode-text" data-lang-key="mode_rag">โหมดหนังสือ</span>
+                </button>
+            </div>
+            
+            <!-- กลุ่มปุ่มตรงกลาง: ควบคุมเสียง -->
+            <div class="toolbar-group">
+                <button id="voice-mode-btn" class="control-btn" data-lang-key="voice_mode">โหมดเสียง</button>
+                <button id="play-pause-btn" class="control-btn hidden" data-lang-key="play">เล่น</button>
+                <button id="mute-btn" class="control-btn hidden" data-lang-key="mute">ปิดเสียง</button>
+            </div>
+
+            <!-- กลุ่มปุ่มด้านขวา: ตั้งค่า -->
+            <div class="toolbar-group">
+                <button id="theme-toggle-btn" class="control-btn" data-lang-key="toggle_theme">เปลี่ยนธีม</button>
+                <button id="lang-toggle-btn" class="control-btn" data-lang-key="lang_toggle">EN</button>
+            </div>
+        </div>
+        <!-- ### <<< CHANGE END >>> ### -->
+    </div>
+
+    <!-- External Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    
+    <!-- Our Custom JavaScript -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
