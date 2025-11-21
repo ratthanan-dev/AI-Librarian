@@ -1,0 +1,14 @@
+flask[async]
+python-dotenv
+tqdm
+langchain
+langchain-community
+langchain-google-genai
+langchain-groq
+google-generativeai
+faiss-cpu
+edge-tts
+sounddevice
+torch
+transformers
+soundfile
