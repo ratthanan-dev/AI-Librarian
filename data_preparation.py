@@ -1,6 +1,5 @@
-# data_preparation.py (เวอร์ชันปรับปรุงสำหรับ Language-Specific RAG)
-# สคริปต์สำหรับกระบวนการ ETL (Extract, Transform, Load)
-# หน้าที่: อ่านข้อมูล, สร้าง Chunks แบบแยกภาษาพร้อม Metadata, สร้าง Embeddings, และบันทึกเป็น FAISS Index
+# data_preparation.py
+# เวอร์ชัน: Multi-Key, Batch Processing, Rich Metadata
 
 import os
 import json
@@ -8,211 +7,220 @@ import time
 import shutil
 from pathlib import Path
 from tqdm import tqdm
-from dotenv import load_dotenv
 
 # LangChain components
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain.docstore.document import Document
+from langchain_core.documents import Document
+# นำเข้า Config ใหม่
+from config import api_keys
 
 # --- Configuration ---
 
-# V V V --- สวิตช์ควบคุม --- V V V
-USE_PROGRESS_LOG = False
-# ^ ^ ^ --- สวิตช์ควบคุม --- ^ ^ ^
-
+BATCH_SIZE = 10  # จำนวนหนังสือที่จะประมวลผลก่อนบันทึก 1 ครั้ง (ป้องกันแรมเต็มและ Error)
 DATA_DIR = Path("data")
 INDEX_DIR = Path("faiss_index")
 DATA_FILE = DATA_DIR / "all_books.jsonl"
 INDEX_PATH = INDEX_DIR / "book_index"
 PROGRESS_FILE = DATA_DIR / "progress.log"
 
+# สร้างโฟลเดอร์ถ้ายังไม่มี
 DATA_DIR.mkdir(exist_ok=True)
 INDEX_DIR.mkdir(exist_ok=True)
 
-# --- Helper Functions (คงเดิม) ---
+# --- Helper Functions ---
 
 def load_progress():
-    if not USE_PROGRESS_LOG or not PROGRESS_FILE.exists():
+    if not PROGRESS_FILE.exists():
         return set()
     with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f)
 
-def save_progress(book_id):
-    if not USE_PROGRESS_LOG:
-        return
+def save_progress(book_ids):
     with open(PROGRESS_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{book_id}\n")
+        for bid in book_ids:
+            f.write(f"{bid}\n")
+
+def get_embeddings_model():
+    """สร้าง Embedding Model โดยใช้คีย์จาก Config"""
+    return GoogleGenerativeAIEmbeddings(
+        model="models/text-embedding-004",
+        google_api_key=api_keys.get_google_key(), # ใช้คีย์จาก KeyManager
+        request_timeout=120
+    )
 
 # --- Main Script ---
 
 def main():
-    print("🚀 Starting AI Librarian Data Preparation Script (Language-Specific RAG Version)...")
-    print(f"🔄 Progress Tracking Mode: {'ENABLED' if USE_PROGRESS_LOG else 'DISABLED'}")
-
-    if not USE_PROGRESS_LOG:
-        print("🔥 Forcing a full rebuild...")
-        if INDEX_PATH.exists():
-            shutil.rmtree(INDEX_PATH)
-            print("🗑️  Deleted existing FAISS index.")
-        if PROGRESS_FILE.exists():
-            os.remove(PROGRESS_FILE)
-            print("🗑️  Deleted progress log file.")
-
-    load_dotenv()
-    google_api_key = os.getenv("GOOGLE_API_KEY_NNG") # <-- อาจจะต้องเปลี่ยน Key ให้ตรงกับ .env ของคุณ
-    if not google_api_key:
-        print("❌ Error: GOOGLE_API_KEY_NNG not found in .env file.")
-        return
+    print("🚀 Starting AI Librarian Data Preparation...")
+    print(f"📦 Batch Size: {BATCH_SIZE}")
 
     if not DATA_FILE.exists():
         print(f"❌ Error: Data file not found at {DATA_FILE}")
         return
 
-    print("✨ Initializing embedding model (text-embedding-004)...")
-    try:
-        embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/text-embedding-004",
-            google_api_key=google_api_key,
-            request_timeout=120
-        )
-    except Exception as e:
-        print(f"❌ Error initializing embedding model: {e}")
-        return
-
+    # โหลดรายการหนังสือที่ทำเสร็จแล้ว
     processed_books = load_progress()
     if processed_books:
-        print(f"✅ Found {len(processed_books)} books already processed. They will be skipped.")
+        print(f"🔄 Found {len(processed_books)} books already processed. Resuming...")
 
-    all_docs = []
-    new_book_count = 0
+    # เตรียม Embedding Model
+    embeddings = get_embeddings_model()
+
+    # เตรียมตัวแปรสำหรับ Batch
+    batch_docs = []
+    batch_book_ids = []
+    
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         lines = f.readlines()
-        
-    print("📚 Processing books from all_books.jsonl...")
-    for line in tqdm(lines, desc="Processing Books"):
+
+    total_lines = len(lines)
+    
+    for i, line in enumerate(tqdm(lines, desc="Processing Books")):
         try:
             book = json.loads(line)
             book_id = book.get("book_id")
 
+            # ข้ามถ้าทำไปแล้ว
             if not book_id or book_id in processed_books:
                 continue
 
-            ### <<< CHANGE START: NEW CHUNKING LOGIC >>> ###
+            # --- ดึงข้อมูลส่วนกลาง (Metadata) ---
+            # เราจะแปลง List เป็น String เพื่อเก็บใน Metadata (FAISS ไม่ชอบ List)
+            authors_th = ", ".join(book.get('author_th', []))
+            authors_en = ", ".join(book.get('author_en', []))
+            category_th = book.get('category_th', 'General')
+            category_en = book.get('category_en', 'General')
+            year = str(book.get('publication_year', ''))
 
-            # --- 1. Process Thai Data ---
+            # --- 1. Process Thai Data (TH) ---
             title_th = book.get("title_th")
             if title_th:
-                # 1.1 Create Thai Book Overview Chunk
-                key_points_th_text = "\n".join(f"- {point}" for point in book.get("key_points_th", []))
+                # 1.1 Book Overview (TH)
+                key_points_th = "\n".join(f"- {p}" for p in book.get("key_points_th", []))
+                
+                # ปรับปรุง Content: ใส่ Category เพื่อให้ AI เข้าใจบริบทกว้างๆ
                 overview_content_th = (
-                    f"ภาพรวมหนังสือ: {title_th}\n"
-                    f"โดย: {', '.join(book.get('author_th', []))}\n"
-                    f"บทสรุป: {book.get('summary_th', '')}\n\n"
-                    f"ประเด็นสำคัญ:\n{key_points_th_text}"
+                    f"หนังสือ: {title_th}\n"
+                    f"ผู้แต่ง: {authors_th}\n"
+                    f"หมวดหมู่: {category_th}\n"  # <--- เพิ่มหมวดหมู่ในเนื้อหา
+                    f"ปีที่พิมพ์: {year}\n\n"
+                    f"บทสรุปย่อ:\n{book.get('summary_th', '')}\n\n"
+                    f"ประเด็นสำคัญ:\n{key_points_th}"
                 )
-                overview_metadata_th = {
-                    "language": "th",
+                
+                # ปรับปรุง Metadata: เพิ่มข้อมูลสำหรับการ Filter
+                meta_th = {
                     "book_id": book_id,
+                    "language": "th",
                     "source": title_th,
-                    "chunk_type": "book_overview"
+                    "type": "overview",
+                    "author": authors_th,
+                    "category": category_th,
+                    "year": year
                 }
-                all_docs.append(Document(page_content=overview_content_th, metadata=overview_metadata_th))
+                batch_docs.append(Document(page_content=overview_content_th, metadata=meta_th))
 
-                # 1.2 Create Thai Chapter Chunks
+                # 1.2 Chapters (TH)
                 for chapter in book.get("chapters_th", []):
-                    chapter_content_th = (
-                        f"จากหนังสือ: {title_th}\n"
-                        f"บทที่ {chapter.get('chapter_number', 'N/A')}: {chapter.get('title', '')}\n\n"
-                        f"สรุปเนื้อหา: {chapter.get('summary', '')}"
+                    chap_content_th = (
+                        f"หนังสือ: {title_th} (หมวด: {category_th})\n"
+                        f"บทที่ {chapter.get('chapter_number')}: {chapter.get('title')}\n\n"
+                        f"เนื้อหาโดยสรุป:\n{chapter.get('summary', '')}"
                     )
-                    chapter_metadata_th = {
-                        "language": "th",
-                        "book_id": book_id,
-                        "source": title_th,
-                        "chunk_type": "chapter",
-                        "chapter": chapter.get('chapter_number', 0)
-                    }
-                    all_docs.append(Document(page_content=chapter_content_th, metadata=chapter_metadata_th))
+                    chap_meta_th = meta_th.copy()
+                    chap_meta_th.update({
+                        "type": "chapter",
+                        "chapter_num": chapter.get('chapter_number')
+                    })
+                    batch_docs.append(Document(page_content=chap_content_th, metadata=chap_meta_th))
 
-            # --- 2. Process English Data ---
+            # --- 2. Process English Data (EN) ---
             title_en = book.get("title_en")
             if title_en:
-                # 2.1 Create English Book Overview Chunk
-                key_points_en_text = "\n".join(f"- {point}" for point in book.get("key_points_en", []))
+                # 2.1 Book Overview (EN)
+                key_points_en = "\n".join(f"- {p}" for p in book.get("key_points_en", []))
+                
                 overview_content_en = (
-                    f"Book Overview: {title_en}\n"
-                    f"By: {', '.join(book.get('author_en', []))}\n"
-                    f"Summary: {book.get('summary_en', '')}\n\n"
-                    f"Key Points:\n{key_points_en_text}"
+                    f"Book: {title_en}\n"
+                    f"Author: {authors_en}\n"
+                    f"Category: {category_en}\n" # <--- Context Injection
+                    f"Year: {year}\n\n"
+                    f"Summary:\n{book.get('summary_en', '')}\n\n"
+                    f"Key Points:\n{key_points_en}"
                 )
-                overview_metadata_en = {
-                    "language": "en",
+                
+                meta_en = {
                     "book_id": book_id,
+                    "language": "en",
                     "source": title_en,
-                    "chunk_type": "book_overview"
+                    "type": "overview",
+                    "author": authors_en,
+                    "category": category_en,
+                    "year": year
                 }
-                all_docs.append(Document(page_content=overview_content_en, metadata=overview_metadata_en))
+                batch_docs.append(Document(page_content=overview_content_en, metadata=meta_en))
 
-                # 2.2 Create English Chapter Chunks
+                # 2.2 Chapters (EN)
                 for chapter in book.get("chapters_en", []):
-                    chapter_content_en = (
-                        f"From the book: {title_en}\n"
-                        f"Chapter {chapter.get('chapter_number', 'N/A')}: {chapter.get('title', '')}\n\n"
-                        f"Content Summary: {chapter.get('summary', '')}"
+                    chap_content_en = (
+                        f"Book: {title_en} (Category: {category_en})\n"
+                        f"Chapter {chapter.get('chapter_number')}: {chapter.get('title')}\n\n"
+                        f"Content Summary:\n{chapter.get('summary', '')}"
                     )
-                    chapter_metadata_en = {
-                        "language": "en",
-                        "book_id": book_id,
-                        "source": title_en,
-                        "chunk_type": "chapter",
-                        "chapter": chapter.get('chapter_number', 0)
-                    }
-                    all_docs.append(Document(page_content=chapter_content_en, metadata=chapter_metadata_en))
-            
-            ### <<< CHANGE END >>> ###
-            
-            new_book_count += 1
-            save_progress(book_id)
+                    chap_meta_en = meta_en.copy()
+                    chap_meta_en.update({
+                        "type": "chapter",
+                        "chapter_num": chapter.get('chapter_number')
+                    })
+                    batch_docs.append(Document(page_content=chap_content_en, metadata=chap_meta_en))
+
+            # เพิ่ม ID ลงใน Batch tracker
+            batch_book_ids.append(book_id)
+
+            # --- Batch Saving Logic ---
+            # บันทึกเมื่อครบ Batch หรือเป็นหนังสือเล่มสุดท้าย
+            if len(batch_book_ids) >= BATCH_SIZE or i == total_lines - 1:
+                if batch_docs:
+                    try:
+                        print(f"\n💾 Saving batch of {len(batch_book_ids)} books ({len(batch_docs)} chunks)...")
+                        
+                        if INDEX_PATH.exists():
+                            # โหลดของเดิมมาบวกเพิ่ม
+                            db = FAISS.load_local(str(INDEX_PATH), embeddings, allow_dangerous_deserialization=True)
+                            db.add_documents(batch_docs)
+                        else:
+                            # สร้างใหม่ถ้ายังไม่มี
+                            db = FAISS.from_documents(batch_docs, embeddings)
+                        
+                        # บันทึกลง Disk
+                        db.save_local(str(INDEX_PATH))
+                        
+                        # บันทึก Progress
+                        save_progress(batch_book_ids)
+                        
+                        # Reset Batch
+                        batch_docs = []
+                        batch_book_ids = []
+                        
+                        # พักหายใจ 2 วินาที เพื่อลดภาระ API
+                        time.sleep(2) 
+                        
+                    except Exception as e:
+                        print(f"❌ Error saving batch: {e}")
+                        # กรณี Error อาจจะเลือกที่จะหยุด หรือข้าม ไปก่อน
+                        # ในที่นี้เลือกที่จะไม่บันทึก Progress ของ Batch นี้เพื่อให้ลองใหม่รอบหน้า
+                        batch_docs = []
+                        batch_book_ids = []
 
         except json.JSONDecodeError:
-            print(f"⚠️ Warning: Skipping a line due to invalid JSON format. Content: {line[:100]}")
+            print(f"⚠️ Invalid JSON at line {i}")
+            continue
+        except Exception as e:
+            print(f"⚠️ Unexpected error processing line {i}: {e}")
             continue
 
-    if not all_docs:
-        print("\n✅ No new books to process. The index is already up to date.")
-        return
-
-    print(f"\nCreated {len(all_docs)} new document chunks from {new_book_count} new book(s).")
-    
-    max_retries = 5
-    retry_delay = 5
-
-    for attempt in range(max_retries):
-        try:
-            if INDEX_PATH.exists() and USE_PROGRESS_LOG:
-                print("📂 Loading existing FAISS index to add new data...")
-                db = FAISS.load_local(str(INDEX_PATH), embeddings, allow_dangerous_deserialization=True)
-                print(f"➕ Adding {len(all_docs)} new documents to the index...")
-                db.add_documents(all_docs)
-            else:
-                print("✨ Creating new FAISS index from scratch...")
-                db = FAISS.from_documents(all_docs, embeddings)
-            
-            print("💾 Saving index to disk...")
-            db.save_local(str(INDEX_PATH))
-            print("🎉 Success! FAISS index has been created/updated successfully.")
-            break
-
-        except Exception as e:
-            print(f"🔥 An error occurred during embedding/indexing (Attempt {attempt + 1}/{max_retries}): {e}")
-            if attempt < max_retries - 1:
-                print(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                retry_delay *= 2
-            else:
-                print("❌ Failed to create/update index after multiple retries.")
-                break
+    print("\n✅ All Data Processing Complete!")
 
 if __name__ == "__main__":
     main()

@@ -133,7 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
             contentDiv.innerHTML = marked.parse(text);
             contentDiv.querySelectorAll('pre code').forEach(hljs.highlightElement);
             bubbleDiv.appendChild(contentDiv);
-            
+
             lastSpokenText = { text: text, language: language, statusId: statusId };
             updateAudioButtonsVisibility(true);
         } else {
@@ -161,7 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
             scrollToBottom();
         }
     };
-    
+
     // ฟังก์ชันนี้ยังคงมีประโยชน์สำหรับ typing indicator
     const scrollToBottom = () => {
         chatWindow.scrollTop = chatWindow.scrollHeight;
@@ -212,16 +212,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const playLastResponse = async () => {
         if (!lastSpokenText || !lastSpokenText.text) return;
-        
+
         const statusElement = document.getElementById(lastSpokenText.statusId);
 
         try {
             const response = await fetch('/tts', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    text: lastSpokenText.text, 
-                    language: lastSpokenText.language 
+                body: JSON.stringify({
+                    text: lastSpokenText.text,
+                    language: lastSpokenText.language
                 })
             });
             const data = await response.json();
@@ -246,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
             audioPlayer.pause();
         }
     };
-    
+
     const updatePlayPauseButtonText = () => {
         playPauseBtn.textContent = audioPlayer.paused ? translations[currentLang].play : translations[currentLang].pause;
     };
@@ -267,7 +267,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 recognition.start();
                 console.log("Speech recognition started.");
-            } catch(e) {
+            } catch (e) {
                 console.error("Error starting recognition (might already be active):", e);
             }
         }
@@ -279,15 +279,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/voice_mode_ask', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    query: query, 
+                body: JSON.stringify({
+                    query: query,
                     mode: currentMode
                 })
             });
             const data = await response.json();
-            
+
             voiceStatusText.textContent = data.answer;
-            
+
             if (data.audio_url) {
                 audioPlayer.src = data.audio_url;
                 audioPlayer.muted = isMuted;
@@ -315,15 +315,51 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 9. Button Logic ---
     const updateModeButtonText = () => {
-        modeText.textContent = currentMode === 'rag' ? translations[currentLang].mode_rag : translations[currentLang].mode_general;
+        const isRag = currentMode === 'rag';
+        const text = isRag ? translations[currentLang].mode_rag : translations[currentLang].mode_general;
+
+        // Update Main Toolbar Button
+        modeText.textContent = text;
+        modeIconRag.classList.toggle('hidden', !isRag);
+        modeIconGeneral.classList.toggle('hidden', isRag);
+
+        // Update Voice Mode Button
+        const voiceModeText = document.getElementById('voice-mode-text');
+        const voiceModeIconRag = document.getElementById('voice-mode-icon-rag');
+        const voiceModeIconGeneral = document.getElementById('voice-mode-icon-general');
+
+        if (voiceModeText) voiceModeText.textContent = text;
+        if (voiceModeIconRag) voiceModeIconRag.classList.toggle('hidden', !isRag);
+        if (voiceModeIconGeneral) voiceModeIconGeneral.classList.toggle('hidden', isRag);
     };
 
-    modeToggleBtn.addEventListener('click', () => {
+    const toggleMode = () => {
         currentMode = currentMode === 'rag' ? 'general' : 'rag';
-        modeIconRag.classList.toggle('hidden', currentMode !== 'rag');
-        modeIconGeneral.classList.toggle('hidden', currentMode !== 'general');
         updateModeButtonText();
-    });
+
+        // Feedback for Voice Mode
+        if (isVoiceModeActive) {
+            const feedbackText = currentLang === 'th'
+                ? `เปลี่ยนเป็น${currentMode === 'rag' ? 'โหมดหนังสือ' : 'โหมดคุยเล่น'}แล้วครับ`
+                : `Switched to ${currentMode === 'rag' ? 'Book Mode' : 'Chat Mode'}`;
+            voiceStatusText.textContent = feedbackText;
+
+            // Reset status text after a short delay
+            setTimeout(() => {
+                if (isVoiceModeActive && voiceStatusText.textContent === feedbackText) {
+                    voiceStatusText.textContent = translations[currentLang].voice_listening;
+                }
+            }, 2000);
+        }
+    };
+
+    modeToggleBtn.addEventListener('click', toggleMode);
+
+    // New Event Listener for Voice Mode Toggle Button
+    const voiceModeToggleBtn = document.getElementById('voice-mode-toggle-btn');
+    if (voiceModeToggleBtn) {
+        voiceModeToggleBtn.addEventListener('click', toggleMode);
+    }
 
     langToggleBtn.addEventListener('click', () => {
         const newLang = currentLang === 'th' ? 'en' : 'th';
@@ -349,7 +385,7 @@ document.addEventListener('DOMContentLoaded', () => {
     muteBtn.addEventListener('click', toggleMute);
     audioPlayer.addEventListener('play', updatePlayPauseButtonText);
     audioPlayer.addEventListener('pause', updatePlayPauseButtonText);
-    
+
     audioPlayer.addEventListener('ended', () => {
         updatePlayPauseButtonText();
         if (isVoiceModeActive) {
@@ -399,7 +435,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error("Speech recognition error:", event.error);
             if (isVoiceModeActive) {
                 voiceStatusText.textContent = translations[currentLang].voice_error;
-                 setTimeout(() => {
+                setTimeout(() => {
                     if (isVoiceModeActive) {
                         voiceStatusText.textContent = translations[currentLang].voice_listening;
                         startSpeechRecognition();
@@ -408,7 +444,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             micBtn.disabled = false;
         };
-        
+
         recognition.onend = () => {
             console.log("Speech recognition service ended.");
             if (!isVoiceModeActive) {

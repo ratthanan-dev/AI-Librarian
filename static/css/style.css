@@ -302,6 +302,18 @@ body {
     100% { transform: scale(1); opacity: 1; }
 }
 
+#voice-mode-toggle-btn {
+    background-color: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    color: white;
+    transition: all 0.3s ease;
+}
+
+#voice-mode-toggle-btn:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+    transform: scale(1.05);
+}
+
 /* --- 9. Utility Classes --- */
 .hidden {
     display: none !important;
