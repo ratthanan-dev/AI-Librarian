@@ -26,11 +26,14 @@ from gtts import gTTS
 # ### <<< CHANGE: นำเข้า config ใหม่แทนการโหลด .env เอง >>> ###
 from config import api_keys 
 
+# ### <<< NEW: Advanced RAG Engine >>> ###
+from rag_engine import AdvancedRAGEngine
+
 # --- 1. CONFIGURATION & INITIALIZATION ---
 
 logging.basicConfig(level=logging.INFO)
 
-# === HELPER FUNCTION: Remove Emoji from text for TTS ===
+# === HELPER FUNCTION: Clean text for TTS (remove emoji and special characters) ===
 def remove_emoji(text):
     """Remove emoji characters from text to prevent TTS errors."""
     emoji_pattern = re.compile(
@@ -45,6 +48,49 @@ def remove_emoji(text):
         flags=re.UNICODE
     )
     return emoji_pattern.sub('', text)
+
+def clean_text_for_tts(text):
+    """
+    Clean text for TTS by removing emoji and special characters.
+    This prevents TTS from reading markdown symbols and special characters aloud.
+    """
+    # Step 1: Remove emoji
+    text = remove_emoji(text)
+    
+    # Step 2: Remove URLs
+    text = re.sub(r'https?://\S+|www\.\S+', '', text)
+    
+    # Step 3: Remove markdown code blocks (```code```)
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    
+    # Step 4: Remove inline code (`code`)
+    text = re.sub(r'`[^`]+`', '', text)
+    
+    # Step 5: Remove markdown headers (###)
+    text = re.sub(r'#{1,6}\s*', '', text)
+    
+    # Step 6: Remove markdown bold/italic (**, *, __, _)
+    text = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', text)
+    text = re.sub(r'_{1,2}([^_]+)_{1,2}', r'\1', text)
+    
+    # Step 7: Remove markdown bullet points and numbered lists
+    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+    
+    # Step 8: Remove markdown blockquotes
+    text = re.sub(r'^\s*>\s*', '', text, flags=re.MULTILINE)
+    
+    # Step 9: Remove markdown links [text](url)
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    
+    # Step 10: Remove special characters that TTS might read aloud
+    # Keep Thai, English, numbers, spaces, and common punctuation (.,!?:;)
+    text = re.sub(r'[^\u0E00-\u0E7Fa-zA-Z0-9\s.,!?;:\'"()\-]', ' ', text)
+    
+    # Step 11: Clean up multiple spaces and trim
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text
 
 # หมายเหตุ: เราไม่ต้องตรวจสอบ Key ที่นี่แล้ว เพราะ Class KeyManager ใน config.py 
 # จะทำหน้าที่ตรวจสอบและ Raise ValueError ให้ถ้าไม่มีคีย์
@@ -65,11 +111,12 @@ llm_gemini_flash = None
 llm_groq_router = None
 language_router_chain = None
 chains = {"th": {}, "en": {}}
+rag_engine = None  # Advanced RAG Engine
 
 # --- 2. MODEL & VECTOR STORE LOADING ---
 
 def load_models_and_db():
-    global db, embeddings_model, llm_gemini_flash, llm_groq_router, language_router_chain, chains
+    global db, embeddings_model, llm_gemini_flash, llm_groq_router, language_router_chain, chains, rag_engine
     app.logger.info("--- 🚀 Initializing AI Librarian Backend (with Key Manager)... ---")
     try:
         # ### <<< CHANGE: เรียกใช้คีย์จาก api_keys >>> ###
@@ -124,6 +171,17 @@ def load_models_and_db():
             chains[lang_code]["general_voice"] = voice_general_prompt | llm_gemini_flash | StrOutputParser()
          
         app.logger.info("   ✅ All chains built successfully.")
+        
+        # ### <<< NEW: Initialize Advanced RAG Engine >>> ###
+        app.logger.info("6. Initializing Advanced RAG Engine (Hybrid Search + Reranking)...")
+        rag_engine = AdvancedRAGEngine(
+            vectorstore=db,
+            llm=llm_groq_router,
+            use_reranker=True,
+            use_multi_query=False  # Set to True to enable multi-query (adds latency)
+        )
+        app.logger.info("   ✅ Advanced RAG Engine initialized.")
+        
         app.logger.info("--- ✨ AI Librarian is ready to serve! ---")
 
     except Exception as e:
@@ -168,7 +226,8 @@ def chat():
 
         answer = ""
         if mode == "rag":
-            docs = db.similarity_search(query, k=4, filter={"language": detected_language})
+            # ### <<< CHANGED: Use Advanced RAG with Hybrid Search + Reranking >>> ###
+            docs = rag_engine.hybrid_search(query, k=4, language=detected_language)
             context = "\n\n---\n\n".join([doc.page_content for doc in docs])
             selected_chain = chains[detected_language]["rag_chat"]
             answer = selected_chain.invoke({"context": context, "question": query})
@@ -216,11 +275,12 @@ async def voice_mode_ask():
         
         text_answer = ""
         if mode == "rag":
-            docs = db.similarity_search(query, k=3, filter={"language": detected_language})
+            # ### <<< CHANGED: Use Advanced RAG with Hybrid Search + Reranking >>> ###
+            docs = rag_engine.hybrid_search(query, k=3, language=detected_language)
             context = "\n\n---\n\n".join([doc.page_content for doc in docs])
             
             # === DEBUG: RAG Context ===
-            print(f"   📚 RAG Mode - Found {len(docs)} documents")
+            print(f"   📚 RAG Mode - Found {len(docs)} documents (Hybrid Search)")
             
             selected_chain = chains[detected_language]["rag_voice"]
             text_answer = selected_chain.invoke({"context": context, "question": query})
@@ -248,9 +308,9 @@ async def voice_mode_ask():
         try:
             if not filepath.exists():
                 print(f"   ⏳ Generating new audio file...")
-                # Remove emoji before TTS
-                clean_text = remove_emoji(text_answer)
-                print(f"   🧹 Clean text (no emoji): {clean_text[:50]}...")
+                # Clean text for TTS (remove emoji, markdown, special chars)
+                clean_text = clean_text_for_tts(text_answer)
+                print(f"   🧹 Clean text for TTS: {clean_text[:50]}...")
                 
                 # Try Edge TTS first, fallback to gTTS
                 try:
@@ -314,9 +374,9 @@ async def text_to_speech():
     try:
         if not filepath.exists():
             print(f"   ⏳ Generating new audio file...")
-            # Remove emoji before TTS
-            clean_text = remove_emoji(text)
-            print(f"   🧹 Clean text (no emoji): {clean_text[:50]}...")
+            # Clean text for TTS (remove emoji, markdown, special chars)
+            clean_text = clean_text_for_tts(text)
+            print(f"   🧹 Clean text for TTS: {clean_text[:50]}...")
             
             # Try Edge TTS first, fallback to gTTS
             try:

@@ -2,7 +2,9 @@
 
 ## 📖 Project Overview
 
-AI Librarian is an innovative full-stack web application designed to revolutionize how library users discover and interact with books. It functions as an intelligent, voice-interactive librarian, moving beyond traditional keyword searches to provide accurate, context-aware book recommendations based on natural language queries. Leveraging advanced AI techniques, this system aims to make information access more intuitive, engaging, and personalized.
+AI Librarian is an innovative full-stack web application designed to revolutionize how library users discover and interact with books. The system features an AI librarian assistant named **"Lite" (ไลท์)** that provides intelligent, voice-interactive support for book recommendations and general conversations.
+
+Moving beyond traditional keyword searches, AI Librarian leverages advanced AI techniques including **RAG (Retrieval-Augmented Generation)** architecture to provide accurate, context-aware book recommendations based on natural language queries, significantly reducing AI "hallucinations" and ensuring factual accuracy.
 
 This project was proudly developed as a final project for the Computer Technology department.
 
@@ -10,17 +12,37 @@ This project was proudly developed as a final project for the Computer Technolog
 
 ## ✨ Key Features
 
--   **🗣️ Voice & Text Interaction:** Seamlessly interact with the AI using both voice commands and text input, offering flexibility to users.
+-   **� Dual-Mode Conversation:** Two conversation modes for different needs:
+    -   **Book Mode:** Uses RAG architecture to provide accurate book recommendations from the knowledge base.
+    -   **Chat Mode:** General conversation mode for topics beyond books using the LLM's general knowledge.
+-   **�🗣️ Voice & Text Interaction:** Seamlessly interact with the AI using both voice commands (via Web Speech API) and text input.
 -   **🧠 RAG Architecture:** Employs a robust Retrieval-Augmented Generation (RAG) architecture to provide answers grounded in a curated knowledge base, significantly reducing "hallucinations" and ensuring factual accuracy.
 -   **🔍 Semantic Search:** Discovers books based on the *meaning* and *context* of the user's query, rather than just matching keywords, powered by a highly efficient FAISS vector store.
 -   **🌐 Bilingual Support:** Designed to understand and respond effectively in both Thai and English, featuring intelligent language detection and appropriate Text-to-Speech (TTS) voice selection.
 -   **🚀 Hybrid AI Model Integration:** Strategically utilizes the Groq API for lightning-fast language detection and initial understanding, combined with the Google Gemini API for high-quality, nuanced response generation.
--   **🎙️ Continuous Voice Mode:** Offers a hands-free, continuous conversational experience, allowing users to engage in a natural, back-and-forth dialogue with the AI.
--   **🎨 Modern & Responsive UI:** Presents a clean, user-friendly interface with toggles for light/dark themes and language preferences, ensuring an accessible and pleasant user experience across devices.
+-   **🎙️ Continuous Voice Mode:** Offers a hands-free, continuous conversational experience—after the AI finishes speaking, the system automatically returns to listening mode for seamless back-and-forth dialogue.
+-   **🎨 Modern & Responsive UI:** Presents a clean, user-friendly interface with toggles for light/dark themes, language preferences, audio playback controls, and more.
 
 ---
 
-## 🛠️ Technology Stack
+## � User Satisfaction Results
+
+Based on user testing with 10 participants (primarily students and educators), the AI Librarian system achieved an **overall satisfaction score of 4.54 out of 5** (Excellent rating).
+
+| Category | Score | Rating |
+|----------|-------|--------|
+| **UI Clarity & Ease of Use** | 4.70 | Excellent |
+| **Book Recommendations Quality** | 4.70 | Excellent |
+| **TTS Voice Quality** | 4.60 | Excellent |
+| **Hands-free Experience** | 4.60 | Excellent |
+| **Overall Satisfaction** | 4.60 | Excellent |
+| **Likelihood to Use Again** | 4.60 | Excellent |
+| **Response Speed** | 4.30 | Very Good |
+| **STT Accuracy** | 4.30 | Very Good |
+
+---
+
+## �🛠️ Technology Stack
 
 -   **Backend:** Python, Flask, LangChain, Gunicorn (for production-like environment if desired)
 -   **AI & Machine Learning:** Google Gemini API, Groq API, FAISS (Vector Database), `sentence-transformers` (for embeddings), `edge-tts` (for Text-to-Speech)
